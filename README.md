@@ -1,90 +1,178 @@
 # VibeReading
+English | [中文](./README_CN.md)
+> Stop Reading books by yourself, vibe reading now.
 
-An AI-powered reading assistant that builds a knowledge graph from your documents and lets you explore them through a conversational agent.
+VibeReading is an AI assistant for deep document reading. After you upload a file, it builds a knowledge-graph index and helps you locate, explain, and connect content through streaming conversations.
 
-## Features
+The project currently supports both text and PDF workflows, including multi-project management, chat history, in-document navigation, and precise PDF positioning.
 
-- Upload `.txt` or `.md` files and automatically index them into a GraphRAG knowledge graph
-- Chat with an AI agent that can query the graph, explore node neighborhoods, and synthesize answers
-- Interactive knowledge graph visualization with real-time node highlighting when the agent accesses nodes
-- Resizable split panel: document viewer on the left, chat on the right
+## 1. Core Capabilities
 
-## Architecture
+- Document upload and indexing
+  - Supports `.txt`, `.md`, and `.pdf`
+  - Text files go directly through the GraphRAG indexing pipeline
+  - PDF files are first parsed to Markdown via MinerU, then indexed
 
-```
+- Knowledge-graph retrieval and QA
+  - Uses `nano-graphrag` to build an entity-relation graph
+  - Agent tools cover local/global retrieval, node details, and neighborhood exploration
+  - Chat endpoint uses SSE streaming for real-time frontend rendering
+
+- Document-viewer linkage
+  - Supports citation links in `doc://scroll?line=N` format
+  - In PDF mode, Markdown line numbers are mapped back to PDF page/position
+  - Built-in PDF.js reader supports zoom, paging, page jump, and text selection
+
+- Project management
+  - Each indexing result is persisted under `projects/<slug>/`
+  - Supports listing projects, activating projects, and deleting non-active projects
+  - Supports one-time migration from legacy `nano_graphrag_cache/` layout
+
+- Conversation experience
+  - Multi-turn context support (`history`)
+  - Local conversation snapshots, isolated per project
+  - One-click continue when the agent reaches recursion/step limits
+
+## 2. Tech Stack
+
+- Backend
+  - FastAPI
+  - LangChain + LangGraph ReAct Agent
+  - `nano-graphrag` (GraphRAG)
+  - OpenAI-compatible API endpoints (e.g., Qwen-compatible endpoints)
+
+- Frontend
+  - Vanilla HTML/CSS/JavaScript
+  - marked (Markdown rendering)
+  - KaTeX (math rendering)
+  - PDF.js (PDF rendering and interactions)
+
+## 3. Project Structure (Key Paths)
+
+```text
 VibeReading/
-├── NanoRAG.py              # GraphRAG wrapper (nano-graphrag)
 ├── backend/
-│   ├── app.py              # FastAPI entry point
-│   ├── config.py           # Settings from .env
+│   ├── app.py                     # FastAPI entry, mounts API and frontend static assets
+│   ├── config.py                  # .env settings loader
 │   ├── api/
-│   │   ├── schemas.py      # Pydantic request/response models
+│   │   ├── schemas.py             # Pydantic models
 │   │   └── routes/
-│   │       ├── files.py    # Upload, index status, content
-│   │       ├── chat.py     # SSE streaming chat
-│   │       └── graph.py    # Graph data & node traversal
+│   │       ├── files.py           # Upload/status/content/raw-file endpoints
+│   │       ├── chat.py            # SSE streaming chat endpoint
+│   │       └── projects.py        # Project list/activate/delete
 │   └── core/
-│       ├── state.py        # Shared app state (RAG instance, index status)
-│       ├── rag_tools.py    # LangChain tools wrapping NanoRAG
-│       └── agent.py        # deepagents agent setup
-└── frontend/
-    ├── index.html
-    ├── css/styles.css
-    └── js/
-        ├── app.js          # Global state, file upload, panel resize
-        ├── viewer.js       # Markdown document renderer
-        ├── graph.js        # vis-network graph visualization
-        └── chat.js         # SSE chat consumer, streaming renderer
+│       ├── agent.py               # Agent construction and system prompt
+│       ├── rag_tools.py           # Agent toolset (RAG + document navigation)
+│       ├── mineru.py              # MinerU PDF parsing client
+│       └── state.py               # Shared runtime state
+├── frontend/
+│   ├── index.html                 # Page skeleton
+│   ├── css/styles.css             # Styles
+│   └── js/
+│       ├── app.js                 # Upload, status polling, project management, theme switch
+│       ├── viewer.js              # Document/PDF viewer
+│       └── chat.js                # Streaming chat rendering and history management
+├── NanoRAG.py                     # GraphRAG wrapper (index/query/graph export)
+├── projects/                      # Project-scoped index data
+├── uploads/                       # Uploaded files
+├── pyproject.toml                 # Python dependencies
+└── README_CN.md                   # Chinese readme
 ```
 
-## Setup
+## 4. Prerequisites
 
-### 1. Install dependencies
+- Python 3.11+
+- `uv` is recommended for dependency management and running
+- Valid LLM/embedding API keys
+- MinerU token if you need PDF parsing
+
+Install dependencies:
 
 ```bash
 uv sync
 ```
 
-### 2. Configure environment
+## 5. Configure `.env`
 
-Copy and fill in your API keys:
+Copy the template:
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` variables:
+Key variables:
 
-```ini
-# NanoRAG — used for document indexing and graph construction
-NANO_GRAPHRAG_API_KEY=your_api_key
-NANO_GRAPHRAG_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-NANO_GRAPHRAG_BEST_MODEL=qwen3-max-2026-01-23
-NANO_GRAPHRAG_CHEAP_MODEL=qwen3.5-flash
-NANO_GRAPHRAG_EMBEDDING_MODEL=text-embedding-v3
+- NanoRAG (required)
+  - `NANO_GRAPHRAG_API_KEY`: required
+  - `NANO_GRAPHRAG_BASE_URL`: optional, defaults to DashScope-compatible URL
+  - `NANO_GRAPHRAG_BEST_MODEL`: optional
+  - `NANO_GRAPHRAG_CHEAP_MODEL`: optional
+  - `NANO_GRAPHRAG_EMBEDDING_MODEL`: optional
 
-# Agent — used for the conversational assistant (defaults to NanoRAG values if not set)
-AGENT_API_KEY=your_api_key
-AGENT_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-AGENT_MODEL=qwen3-max-2026-01-23
+- Agent (optional, falls back to NanoRAG values when omitted)
+  - `AGENT_API_KEY`
+  - `AGENT_BASE_URL`
+  - `AGENT_MODEL`
 
-# Storage (optional, defaults shown)
-NANO_WORKING_DIR=nano_graphrag_cache
-UPLOAD_DIR=uploads
-```
+- MinerU (required only for PDF uploads, Apply for a token at https://mineru.net/apiManage/docs)
+  - `MINERU_API_KEY`
 
-### 3. Run
+- Storage paths (optional)
+  - `PROJECTS_DIR`: defaults to `projects`
+  - `UPLOAD_DIR`: defaults to `uploads`
+
+Note: the current code uses `PROJECTS_DIR` and `UPLOAD_DIR`. If you still see `NANO_WORKING_DIR` in `.env.example`, it is a legacy field and not part of the current main flow.
+
+## 6. Run
 
 ```bash
 uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Then open [http://localhost:8000](http://localhost:8000) in your browser.
+Open in your browser:
 
-## Usage
+```text
+http://localhost:8000
+```
 
-1. Click **Upload File** and select a `.txt` or `.md` document
-2. Wait for the indexing status to show **Ready** (this may take a few minutes for large files)
-3. Type questions in the chat panel on the right
-4. Click **Knowledge Graph** to open the graph visualization overlay
-5. When the agent queries or traverses nodes, they are automatically highlighted in the graph
+## 7. Usage
+
+1. Upload a document (`.txt` / `.md` / `.pdf`)
+2. Wait until status changes from `indexing` to `ready`
+3. Ask questions in the chat panel
+4. Click citation links in answers (`doc://scroll?line=N`) to navigate
+5. Switch previous projects from the top `Projects` dropdown
+
+Notes:
+
+- PDF files are converted to Markdown for indexing and semantic positioning, then mapped back to PDF page positions.
+- Chat history is stored locally in the browser, per project.
+
+## 8. Main Backend APIs
+
+- File APIs
+  - `POST /api/files/upload`: upload file and trigger background indexing
+  - `GET /api/files/status`: get indexing status and current file type
+  - `GET /api/files/content`: get current text/markdown content
+  - `GET /api/files/raw`: get original file (used by embedded PDF preview)
+
+- Chat API
+  - `POST /api/chat/stream`: SSE streaming response
+
+- Project APIs
+  - `GET /api/projects`: list projects
+  - `POST /api/projects/{slug}/activate`: activate project
+  - `DELETE /api/projects/{slug}`: delete project (cannot delete the active one)
+
+## 9. Data Directory Notes
+
+- `uploads/`
+  - Raw uploaded files
+
+- `projects/<slug>/`
+  - `session_meta.json`: project metadata
+  - `graph_chunk_entity_relation.graphml`: graph structure
+  - `kv_store_*.json`, `vdb_entities.json`: GraphRAG index artifacts
+  - `full.md`: Markdown converted from PDF (PDF projects only)
+  - `page_map.json` / `paragraph_map.json`: Markdown line to PDF position maps (PDF projects only)
+  - `original.pdf` (or equivalent suffix): project-local copy of the original PDF
