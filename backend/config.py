@@ -60,6 +60,11 @@ class Settings:
         )
     )
 
+    # MinerU PDF parsing (required only when uploading PDF files)
+    mineru_api_key: str = field(
+        default_factory=lambda: _optional("MINERU_API_KEY", "")
+    )
+
     # Storage
     projects_dir: Path = field(
         default_factory=lambda: Path(os.getenv("PROJECTS_DIR", "projects"))

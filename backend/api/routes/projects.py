@@ -111,8 +111,31 @@ async def activate_project(slug: str) -> ActivateResponse:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read project metadata: {exc}") from exc
 
-    filename  = meta.get("filename", slug)
-    file_path = Path(meta.get("file_path", ""))
+    filename          = meta.get("filename", slug)
+    file_path         = Path(meta.get("file_path", ""))
+    file_type         = meta.get("file_type", "text")
+    original_pdf_str  = meta.get("original_pdf_path")
+    original_pdf_path = Path(original_pdf_str) if original_pdf_str else None
+
+    # Restore page map and paragraph map for PDF projects
+    page_map: dict | None = None
+    paragraph_map: dict | None = None
+    if file_type == "pdf":
+        page_map_path = project_dir / "page_map.json"
+        if page_map_path.exists():
+            try:
+                raw_map = json.loads(page_map_path.read_text(encoding="utf-8"))
+                page_map = {int(k): v for k, v in raw_map.items()}
+            except Exception:
+                page_map = None
+
+        para_map_path = project_dir / "paragraph_map.json"
+        if para_map_path.exists():
+            try:
+                raw_para = json.loads(para_map_path.read_text(encoding="utf-8"))
+                paragraph_map = {int(k): v for k, v in raw_para.items()}
+            except Exception:
+                paragraph_map = None
 
     def _do_load() -> None:
         import sys
@@ -126,6 +149,24 @@ async def activate_project(slug: str) -> ActivateResponse:
         app_state.current_filename     = filename
         app_state.current_file_path    = file_path if file_path.exists() else None
         app_state.current_project_slug = slug
+        app_state.file_type            = file_type
+
+        # Resolve the original PDF path: prefer the project-local copy so the
+        # project is self-contained even if uploads/ was cleared.
+        resolved_pdf: Path | None = None
+        if file_type == "pdf":
+            # First try the project-local copy (original.pdf / original.PDF etc.)
+            for candidate in project_dir.glob("original.*"):
+                if candidate.suffix.lower() == ".pdf":
+                    resolved_pdf = candidate
+                    break
+            # Fall back to the path stored in metadata
+            if resolved_pdf is None and original_pdf_path and original_pdf_path.exists():
+                resolved_pdf = original_pdf_path
+
+        app_state.original_pdf_path    = resolved_pdf
+        app_state.pdf_page_map         = page_map
+        app_state.pdf_paragraph_map    = paragraph_map
         app_state.set_rag(rag)
         app_state.set_status(IndexStatus.ready, f"Loaded · {filename}")
 

@@ -73,8 +73,8 @@ async function uploadFileObject(file) {
   if (!file) return;
 
   const suffix = file.name.split('.').pop().toLowerCase();
-  if (!['txt', 'md'].includes(suffix) && file.name.includes('.')) {
-    App.setStatus('error', 'Only .txt and .md files are supported');
+  if (!['txt', 'md', 'pdf'].includes(suffix) && file.name.includes('.')) {
+    App.setStatus('error', 'Only .txt, .md, and .pdf files are supported');
     return;
   }
 
@@ -93,7 +93,7 @@ async function uploadFileObject(file) {
     const data = await res.json();
     App.currentFilename = data.filename;
     document.getElementById('docFilename').textContent = data.filename;
-    App.setStatus('indexing', 'Indexing…');
+    App.setStatus('indexing', suffix === 'pdf' ? 'Converting PDF via MinerU…' : 'Indexing…');
     pollStatus();
     Viewer.loadContent();
     if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename);
@@ -119,38 +119,53 @@ async function uploadFileObject(file) {
 /* ── Drag-and-drop upload ─────────────────────────────────────────────────── */
 (function initDragDrop() {
   const dropZone = document.getElementById('dropZone');
-  let dragCounter = 0;
 
-  // Prevent browser default file-open on drop anywhere in the page
-  document.addEventListener('dragover',  (e) => e.preventDefault());
-  document.addEventListener('drop',      (e) => e.preventDefault());
+  // A full-viewport transparent div that sits above everything (including any
+  // PDF iframe) while a drag is in progress.  By keeping it in the parent
+  // document's stacking context with z-index:9999 it physically covers the
+  // iframe, so all dragover/drop events land here instead of on the browser's
+  // native PDF viewer (which would otherwise trigger a file download).
+  const dragScreen = document.createElement('div');
+  dragScreen.style.cssText = 'position:fixed;inset:0;z-index:9999;display:none;';
+  document.body.appendChild(dragScreen);
 
-  // Show/hide drop zone when dragging over the doc panel body
-  const docBody = document.getElementById('docBody');
-
-  docBody.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    dragCounter++;
+  function _showOverlay() {
     dropZone.classList.add('active');
-  });
+    dragScreen.style.display = 'block';
+  }
 
-  docBody.addEventListener('dragleave', () => {
-    dragCounter--;
-    if (dragCounter <= 0) {
-      dragCounter = 0;
-      dropZone.classList.remove('active');
-    }
-  });
+  function _hideOverlay() {
+    dropZone.classList.remove('active');
+    dragScreen.style.display = 'none';
+  }
 
-  docBody.addEventListener('dragover', (e) => {
+  // Prevent browser default file-open on any stray drop outside our handler
+  document.addEventListener('dragover', (e) => e.preventDefault());
+  document.addEventListener('drop',     (e) => e.preventDefault());
+
+  // Use window capture-phase so this fires before any element (including the
+  // iframe's internal document) can process the dragenter event.
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return;
+    _showOverlay();
+  }, true);
+
+  // dragScreen now catches all subsequent drag events ─────────────────────────
+
+  dragScreen.addEventListener('dragover', (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   });
 
-  docBody.addEventListener('drop', async (e) => {
+  // Only hide when the drag truly leaves the browser window
+  dragScreen.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget !== null) return;
+    _hideOverlay();
+  });
+
+  dragScreen.addEventListener('drop', async (e) => {
     e.preventDefault();
-    dragCounter = 0;
-    dropZone.classList.remove('active');
+    _hideOverlay();
     const file = e.dataTransfer.files[0];
     await uploadFileObject(file);
   });
@@ -169,6 +184,9 @@ function pollStatus() {
         case 'ready':
           App.setStatus('ready', data.filename ? `Ready · ${data.filename}` : 'Ready');
           clearInterval(interval);
+          // Reload viewer once indexing is done so PDF viewer / markdown
+          // is shown with the final file_type from the backend.
+          Viewer.loadContent();
           break;
         case 'error':
           App.setStatus('error', data.message || 'Error');
@@ -317,9 +335,6 @@ function pollStatus() {
         document.getElementById('docFilename').textContent = data.filename;
         App.setStatus('ready', `Ready · ${data.filename}`);
         Viewer.loadContent();
-        // Notify chat module so it loads the correct project history.
-        // All scripts are already parsed at this point (the fetch above is async),
-        // so Chat is always defined here.
         if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename);
       }
     } catch { /* ignore */ }

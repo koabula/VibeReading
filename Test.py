@@ -4,7 +4,7 @@ from NanoRAG import NanoRAG
 
 
 WORKING_DIR = Path("./nano_graphrag_cache_qwen_test")
-INPUT_FILE = Path("./Part1.md")
+INPUT_FILE = Path("./test.md")
 QUERY = "这份材料的主要内容是什么?"
 
 

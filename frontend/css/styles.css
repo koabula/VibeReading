@@ -75,11 +75,21 @@ html, body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
-/* Wider scrollbar for the document panel body */
-.panel-body::-webkit-scrollbar { width: 8px; }
-.panel-body::-webkit-scrollbar-track { background: transparent; }
-.panel-body::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; }
-.panel-body::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+/* Wider vertical scrollbar for the document panel and markdown content */
+.panel-body::-webkit-scrollbar,
+#docContent::-webkit-scrollbar { width: 10px; height: 5px; }
+.panel-body::-webkit-scrollbar-track,
+#docContent::-webkit-scrollbar-track { background: transparent; }
+.panel-body::-webkit-scrollbar-thumb,
+#docContent::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; }
+.panel-body::-webkit-scrollbar-thumb:hover,
+#docContent::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* PDF pages scroll area — wider vertical bar, narrow horizontal bar */
+#pdfPagesScrollArea::-webkit-scrollbar { width: 10px; height: 5px; }
+#pdfPagesScrollArea::-webkit-scrollbar-track { background: transparent; }
+#pdfPagesScrollArea::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; }
+#pdfPagesScrollArea::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* ── Top bar ───────────────────────────────────────────────────────────────── */
 .topbar {

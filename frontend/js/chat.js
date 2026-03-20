@@ -306,12 +306,17 @@
   function activateDocLinks(container) {
     container.querySelectorAll('a[href^="doc://scroll"]').forEach(a => {
       const url  = new URL(a.href.replace('doc://', 'https://doc/'));
-      const line = parseInt(url.searchParams.get('line') || '1', 10);
+      const page = url.searchParams.get('page');
+      const line = url.searchParams.get('line');
       a.removeAttribute('href');
       a.className = 'doc-scroll-link';
       a.addEventListener('click', (e) => {
         e.preventDefault();
-        Viewer.scrollToLine(line);
+        if (page !== null) {
+          Viewer.scrollToPage(parseInt(page, 10));
+        } else {
+          Viewer.scrollToLine(parseInt(line || '1', 10));
+        }
       });
     });
   }
@@ -451,7 +456,8 @@
               break;
 
             case 'scroll_to':
-              if (typeof event.line === 'number') Viewer.scrollToLine(event.line);
+              if (typeof event.page === 'number') Viewer.scrollToPage(event.page);
+              else if (typeof event.line === 'number') Viewer.scrollToLine(event.line);
               break;
 
             case 'recursion_limit':

@@ -25,6 +25,9 @@ class FileStatusResponse(BaseModel):
     status: IndexStatus
     filename: str | None = None
     message: str | None = None
+    file_type: str = "text"
+    pdf_page_map: dict | None = None
+    pdf_paragraph_map: dict | None = None
 
 
 class FileContentResponse(BaseModel):

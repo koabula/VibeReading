@@ -20,6 +20,15 @@ class AppState:
     current_file_path: Path | None = None
     current_project_slug: str | None = None
 
+    # File type: "text" for plain-text/markdown, "pdf" for PDF uploads
+    file_type: str = "text"
+
+    # For PDF files: path to the original PDF, the sparse line→page map, and the
+    # paragraph-level map {md_line: {"page": N, "y_frac": 0.0–1.0}} from MinerU bbox data.
+    original_pdf_path: Path | None = None
+    pdf_page_map: dict | None = None
+    pdf_paragraph_map: dict | None = None
+
     # The NanoRAG instance – created lazily after first successful index
     _rag: object | None = field(default=None, repr=False)
 

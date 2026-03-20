@@ -146,7 +146,9 @@ async def list_key_entities(
 async def get_document_info() -> str:
     """Return basic metadata about the current document: filename, total lines,
     and total character count. Always call this first to know the valid line range
-    before calling read_document."""
+    before calling read_document.
+    For PDF documents also returns file_type='pdf' and total_pages so you can
+    use scroll_to_line to navigate to the correct PDF page."""
     from backend.core.state import app_state
 
     path = app_state.current_file_path
@@ -155,11 +157,23 @@ async def get_document_info() -> str:
 
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    return json.dumps({
+    info: dict = {
         "filename": app_state.current_filename or path.name,
+        "file_type": app_state.file_type,
         "total_lines": len(lines),
         "total_chars": len(text),
-    }, ensure_ascii=False)
+    }
+
+    if app_state.file_type == "pdf" and app_state.pdf_page_map:
+        info["total_pages"] = max(app_state.pdf_page_map.values())
+        info["note"] = (
+            "This is a PDF converted to Markdown for indexing. "
+            "Line numbers here correspond to the Markdown representation. "
+            "Use scroll_to_line(N) to navigate — it automatically converts "
+            "the line number to the correct PDF page for the viewer."
+        )
+
+    return json.dumps(info, ensure_ascii=False)
 
 
 @tool
@@ -202,24 +216,13 @@ async def search_document(
 
 
 @tool
-def create_doc_link(
-    display_text: Annotated[str, "The clickable text the user will see"],
-    line_number: Annotated[int, "The document line number to jump to when clicked"],
-) -> str:
-    """Create a Markdown hyperlink that, when clicked in the chat, scrolls the
-    document viewer to the given line number and highlights it.
-    Embed the returned string verbatim in your response.
-    Example output: [Theorem 2.1](doc://scroll?line=45)"""
-    return f"[{display_text}](doc://scroll?line={line_number})"
-
-
-@tool
 async def scroll_to_line(
     line_number: Annotated[int, "The 1-based line number to scroll the document viewer to"],
 ) -> str:
     """Immediately scroll the left-side document viewer to the specified line number
-    and briefly highlight it. Use this to proactively guide the user's attention
-    while explaining a passage."""
+    and briefly highlight it.  For PDF documents the frontend automatically converts
+    the line number to the corresponding PDF page.
+    Use this to proactively guide the user's attention while explaining a passage."""
     lines = await asyncio.to_thread(_get_doc_lines)
     total = len(lines)
     line = max(1, min(line_number, total))
@@ -242,6 +245,5 @@ ALL_TOOLS = [
     get_document_info,
     read_document,
     search_document,
-    create_doc_link,
     scroll_to_line,
 ]
