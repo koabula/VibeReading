@@ -322,6 +322,7 @@ async def upload_file(file: UploadFile = File(...)) -> FileUploadResponse:
 
     return FileUploadResponse(
         filename=filename,
+        slug=slug,
         status=IndexStatus.indexing,
         message="File uploaded, indexing started in background",
     )
@@ -332,6 +333,7 @@ async def get_status() -> FileStatusResponse:
     return FileStatusResponse(
         status=app_state.index_status,
         filename=app_state.current_filename,
+        slug=app_state.current_project_slug,
         message=app_state.index_message,
         file_type=app_state.file_type,
         pdf_page_map=app_state.pdf_page_map,

@@ -339,10 +339,8 @@ const Viewer = {
     // Clear any inline styles left over from PDF mode so default CSS applies.
     content.removeAttribute('style');
 
-    const lineCount = data.content.split('\n').length;
-    content.innerHTML = renderMarkdownWithMath(data.content);
+    content.innerHTML = _renderLineAwareMarkdown(data.content);
     applyKatex(content);
-    _injectLineAnchors(content, lineCount);
 
     document.getElementById('docFilename').textContent = data.filename;
   },
@@ -358,17 +356,20 @@ const Viewer = {
       this.scrollToPosition(target.page, target.yFrac);
       return;
     }
-    const anchors = Array.from(
-      document.querySelectorAll('#docContent .doc-line-anchor[id^="doc-line-"]')
-    );
+    const exact = document.getElementById(`doc-line-${lineNumber}`);
+    const anchors = exact
+      ? [exact]
+      : Array.from(document.querySelectorAll('#docContent .doc-line-anchor[id^="doc-line-"]'));
     if (!anchors.length) return;
 
-    let best     = anchors[0];
-    let bestDist = Infinity;
-    for (const a of anchors) {
-      const n = parseInt(a.id.slice('doc-line-'.length), 10);
-      const d = Math.abs(n - lineNumber);
-      if (d < bestDist) { bestDist = d; best = a; }
+    let best = anchors[0];
+    if (!exact) {
+      let bestDist = Infinity;
+      for (const a of anchors) {
+        const n = parseInt(a.id.slice('doc-line-'.length), 10);
+        const d = Math.abs(n - lineNumber);
+        if (d < bestDist) { bestDist = d; best = a; }
+      }
     }
 
     const docBody = document.getElementById('docBody');
@@ -535,21 +536,168 @@ function _lineToTarget(lineNumber, paragraphMap, pageMap) {
   return { page: _lineToPage(lineNumber, pageMap), yFrac: 0 };
 }
 
-/**
- * After rendering, distribute invisible line anchors across the top-level
- * block elements proportional to the original text's line count.
- */
-function _injectLineAnchors(container, lineCount) {
-  const blocks = Array.from(container.querySelectorAll(':scope > *'));
-  if (!blocks.length || !lineCount) return;
+function _renderLineAwareMarkdown(source) {
+  const lines = source.split('\n');
+  const htmlParts = [];
 
-  blocks.forEach((block, i) => {
-    const lineNum = Math.max(1, Math.round(((i + 0.5) / blocks.length) * lineCount));
-    const anchor  = document.createElement('a');
-    anchor.id        = `doc-line-${lineNum}`;
-    anchor.className = 'doc-line-anchor';
-    block.insertBefore(anchor, block.firstChild);
+  let inCodeBlock = false;
+  let codeFence = '';
+  let codeLines = [];
+  let codeStartLine = 1;
+  let currentListType = null;
+  let currentListItems = [];
+  let paragraphBuffer = [];
+  let paragraphStartLine = 1;
+
+  const flushParagraph = () => {
+    if (!paragraphBuffer.length) return;
+    const text = paragraphBuffer.join('\n').trimEnd();
+    htmlParts.push(`<p>${_lineAnchorHtml(paragraphStartLine)}${_renderParagraphMarkdown(text)}</p>`);
+    paragraphBuffer = [];
+  };
+
+  const flushList = () => {
+    if (!currentListType || !currentListItems.length) return;
+    const tag = currentListType;
+    htmlParts.push(`<${tag}>${currentListItems.join('')}</${tag}>`);
+    currentListType = null;
+    currentListItems = [];
+  };
+
+  const flushCodeBlock = () => {
+    const langClass = codeFence ? ` class="language-${_escapeHtml(codeFence)}"` : '';
+    const code = _escapeHtml(codeLines.join('\n'));
+    htmlParts.push(
+      `<pre>${_lineAnchorHtml(codeStartLine)}<code${langClass}>${code}</code></pre>`
+    );
+    codeLines = [];
+    codeFence = '';
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineNumber = i + 1;
+    const line = lines[i];
+
+    if (inCodeBlock) {
+      if (/^```/.test(line.trim())) {
+        flushCodeBlock();
+        inCodeBlock = false;
+      } else {
+        codeLines.push(line);
+      }
+      continue;
+    }
+
+    const trimmed = line.trim();
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    const unordered = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ordered = line.match(/^\s*\d+\.\s+(.*)$/);
+    const blockquote = line.match(/^>\s?(.*)$/);
+
+    if (/^```/.test(trimmed)) {
+      flushParagraph();
+      flushList();
+      inCodeBlock = true;
+      codeFence = trimmed.slice(3).trim();
+      codeStartLine = lineNumber;
+      codeLines = [];
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      htmlParts.push(`<div class="doc-empty-line">${_lineAnchorHtml(lineNumber)}</div>`);
+      continue;
+    }
+
+    if (heading) {
+      flushParagraph();
+      flushList();
+      const level = Math.min(6, heading[1].length);
+      htmlParts.push(`<h${level}>${_lineAnchorHtml(lineNumber)}${_renderInlineMarkdownWithMath(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (blockquote) {
+      flushParagraph();
+      flushList();
+      htmlParts.push(`<blockquote>${_lineAnchorHtml(lineNumber)}${_renderInlineMarkdownWithMath(blockquote[1])}</blockquote>`);
+      continue;
+    }
+
+    if (unordered || ordered) {
+      flushParagraph();
+      const nextType = unordered ? 'ul' : 'ol';
+      if (currentListType && currentListType !== nextType) {
+        flushList();
+      }
+      currentListType = nextType;
+      const itemText = unordered ? unordered[1] : ordered[1];
+      currentListItems.push(`<li>${_lineAnchorHtml(lineNumber)}${_renderInlineMarkdownWithMath(itemText)}</li>`);
+      continue;
+    }
+
+    if (!paragraphBuffer.length) {
+      paragraphStartLine = lineNumber;
+    }
+    paragraphBuffer.push(line);
+  }
+
+  if (inCodeBlock) {
+    flushCodeBlock();
+  }
+  flushParagraph();
+  flushList();
+
+  return htmlParts.join('\n');
+}
+
+function _lineAnchorHtml(lineNumber) {
+  return `<a id="doc-line-${lineNumber}" class="doc-line-anchor"></a>`;
+}
+
+function _renderParagraphMarkdown(text) {
+  const html = renderMarkdownWithMath(text).trim();
+  const matched = html.match(/^<p>([\s\S]*)<\/p>$/);
+  return matched ? matched[1] : html;
+}
+
+function _renderInlineMarkdownWithMath(text) {
+  if (typeof marked === 'undefined') return _escapeHtml(text);
+
+  const displayBlocks = [];
+  const inlineBlocks  = [];
+
+  let processed = text.replace(/\$\$([\s\S]+?)\$\$/g, (_, inner) => {
+    const idx = displayBlocks.length;
+    displayBlocks.push(inner);
+    return ` <span class="__katex_d_i__" data-i="${idx}"></span> `;
   });
+
+  processed = processed.replace(/(?<!\$)\$(?!\$)([^\n$]+?)\$(?!\$)/g, (_, inner) => {
+    const idx = inlineBlocks.length;
+    inlineBlocks.push(inner);
+    return `<katex-i data-i="${idx}"></katex-i>`;
+  });
+
+  let html = marked.parseInline(processed);
+
+  if (displayBlocks.length) {
+    html = html.replace(/<span class="__katex_d_i__" data-i="(\d+)"><\/span>/g, (_, i) => {
+      const math = _encodeMathForHtml(displayBlocks[parseInt(i, 10)]);
+      return `<span class="katex-display-wrap">$$${math}$$</span>`;
+    });
+  }
+
+  if (inlineBlocks.length) {
+    html = html.replace(/<katex-i data-i="(\d+)"><\/katex-i>/g, (_, i) => {
+      const math = _encodeMathForHtml(inlineBlocks[parseInt(i, 10)]);
+      return `<span class="katex-inline-wrap">$${math}$</span>`;
+    });
+  }
+
+  return html;
 }
 
 /**

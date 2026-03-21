@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from backend.api.schemas import IndexStatus
+from backend.api.schemas import IndexStatus, ProjectChatHistory
 from backend.config import settings
 from backend.core.state import app_state
 
@@ -16,6 +16,7 @@ router = APIRouter()
 
 _SESSION_META = "session_meta.json"
 _GRAPHML      = "graph_chunk_entity_relation.graphml"
+_CHAT_HISTORY = "chat_history.json"
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +69,50 @@ def _iter_projects() -> list[dict]:
     return results
 
 
+def _project_dir(slug: str) -> Path:
+    return settings.projects_dir / slug
+
+
+def _ensure_project_exists(slug: str) -> Path:
+    project_dir = _project_dir(slug)
+    meta_path = project_dir / _SESSION_META
+    graphml = project_dir / _GRAPHML
+    if not (meta_path.exists() and graphml.exists()):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{slug}' not found or its index is incomplete.",
+        )
+    return project_dir
+
+
+def _chat_history_path(slug: str) -> Path:
+    return _project_dir(slug) / _CHAT_HISTORY
+
+
+def _load_chat_history(slug: str) -> ProjectChatHistory:
+    path = _chat_history_path(slug)
+    if not path.exists():
+        return ProjectChatHistory()
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read chat history: {exc}") from exc
+
+    try:
+        return ProjectChatHistory.model_validate(payload)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid chat history format: {exc}") from exc
+
+
+def _save_chat_history(slug: str, history: ProjectChatHistory) -> None:
+    path = _chat_history_path(slug)
+    path.write_text(
+        json.dumps(history.model_dump(mode="json"), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -96,15 +141,8 @@ async def activate_project(slug: str) -> ActivateResponse:
     if app_state.index_status == IndexStatus.indexing:
         raise HTTPException(status_code=409, detail="Indexing already in progress")
 
-    project_dir = settings.projects_dir / slug
+    project_dir = _ensure_project_exists(slug)
     meta_path   = project_dir / _SESSION_META
-    graphml     = project_dir / _GRAPHML
-
-    if not (meta_path.exists() and graphml.exists()):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Project '{slug}' not found or its index is incomplete.",
-        )
 
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -198,3 +236,16 @@ async def delete_project(slug: str) -> dict:
 
     shutil.rmtree(project_dir, ignore_errors=True)
     return {"status": "deleted", "slug": slug}
+
+
+@router.get("/{slug}/chat-history", response_model=ProjectChatHistory)
+async def get_chat_history(slug: str) -> ProjectChatHistory:
+    _ensure_project_exists(slug)
+    return _load_chat_history(slug)
+
+
+@router.put("/{slug}/chat-history", response_model=ProjectChatHistory)
+async def put_chat_history(slug: str, history: ProjectChatHistory) -> ProjectChatHistory:
+    _ensure_project_exists(slug)
+    _save_chat_history(slug, history)
+    return history

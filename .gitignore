@@ -12,3 +12,4 @@ nano_graphrag_cache_qwen_test
 .env
 uploads/
 projects/
+.uv-cache

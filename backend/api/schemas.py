@@ -17,6 +17,7 @@ class IndexStatus(str, Enum):
 
 class FileUploadResponse(BaseModel):
     filename: str
+    slug: str
     status: IndexStatus
     message: str
 
@@ -24,6 +25,7 @@ class FileUploadResponse(BaseModel):
 class FileStatusResponse(BaseModel):
     status: IndexStatus
     filename: str | None = None
+    slug: str | None = None
     message: str | None = None
     file_type: str = "text"
     pdf_page_map: dict | None = None
@@ -49,6 +51,16 @@ class ChatRequest(BaseModel):
 
 class SSETextChunk(BaseModel):
     type: str = "text"
+    content: str
+
+
+class SSEThoughtChunk(BaseModel):
+    type: str = "thought"
+    content: str
+
+
+class SSEMessageToUserChunk(BaseModel):
+    type: str = "message_to_user"
     content: str
 
 
@@ -91,3 +103,22 @@ class SSEScrollTo(BaseModel):
     type: str = "scroll_to"
     line: int
     highlight: bool = True
+
+
+# ── Project chat history ──────────────────────────────────────────────────────
+
+class ChatMessage(BaseModel):
+    role: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1)
+
+
+class SavedConversation(BaseModel):
+    id: str = Field(..., min_length=1)
+    savedAt: str = Field(..., min_length=1)
+    preview: str = ""
+    messages: list[ChatMessage] = Field(default_factory=list)
+
+
+class ProjectChatHistory(BaseModel):
+    current_messages: list[ChatMessage] = Field(default_factory=list)
+    saved_conversations: list[SavedConversation] = Field(default_factory=list)

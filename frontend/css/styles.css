@@ -547,12 +547,19 @@ html, body {
   border-color: var(--user-bubble-border);
 }
 
+.assistant-message-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: calc(100% - 54px);
+  width: 100%;
+}
+
 .message-bubble {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 12px 16px;
-  max-width: calc(100% - 54px);
   font-size: 14px;
   line-height: 1.72;
   color: var(--text);
@@ -751,40 +758,50 @@ a.doc-scroll-link:hover { opacity: .8; }
 
 /* ── Thinking collapsible block ────────────────────────────────────────────── */
 .thinking-block {
-  margin-bottom: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  border-radius: 14px;
   overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--surface) 92%, white 8%) 0%, var(--surface-2) 100%);
+  box-shadow: 0 8px 20px rgba(0,0,0,.08);
 }
 .thinking-summary {
-  padding: 6px 12px;
-  font-size: 12px;
-  color: var(--text-muted);
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--accent) 48%, var(--text-muted));
   cursor: pointer;
-  background: var(--surface-2);
+  background: color-mix(in srgb, var(--surface-2) 88%, var(--accent-glow));
   list-style: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   user-select: none;
 }
 .thinking-summary::before {
-  content: "▶";
-  font-size: 9px;
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
   transition: transform .2s;
 }
-details[open] .thinking-summary::before { transform: rotate(90deg); }
+details[open] .thinking-summary::before { transform: scale(1.08); }
 .thinking-content {
-  padding: 10px 14px;
-  border-top: 1px solid var(--border);
-  font-size: 13px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 10%, var(--border));
+  font-size: 12px;
   color: var(--text-muted);
+  line-height: 1.7;
+  background: color-mix(in srgb, var(--surface) 95%, white 5%);
 }
-.thought-seg + .thought-seg {
-  border-top: 1px solid var(--border);
-  padding-top: 8px;
-  margin-top: 8px;
-}
+.thinking-content p { margin-bottom: .55em; }
+.thinking-content p:last-child { margin-bottom: 0; }
+.thinking-content ul, .thinking-content ol { padding-left: 1.15em; margin: .4em 0; }
+.thinking-content li { margin-bottom: .2em; }
 
 /* ── Recursion-limit continuation banner ───────────────────────────────────── */
 .recursion-limit-banner {

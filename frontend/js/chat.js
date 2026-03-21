@@ -60,29 +60,82 @@
 
   /* ── Conversation history ───────────────────────────────────────────────── */
   // history[] is sent to the backend with each request so the agent has
-  // multi-turn context. It is also saved to localStorage per project.
+  // multi-turn context. It is also persisted on the backend per project.
   let history         = [];   // [{role, content}, …]
-  let currentFilename = null; // used as localStorage key
+  let currentFilename = null; // used for the history panel label
+  let currentProjectSlug = null;
+  let savedConversations = [];
 
   const MAX_HISTORY_TURNS = 10; // keep last N user/assistant pairs (20 msgs)
 
-  function historyKey() { return 'vr_chat_'  + (currentFilename || '__default__'); }
-  function savedKey()   { return 'vr_saved_' + (currentFilename || '__default__'); }
-
-  function persistHistory() {
-    try { localStorage.setItem(historyKey(), JSON.stringify(history)); } catch { /* quota */ }
+  function clearRenderedMessages() {
+    while (messagesEl.children.length > 1) messagesEl.removeChild(messagesEl.lastChild);
   }
 
-  /** Clear visual messages and restore history from localStorage. */
-  function loadAndRestoreHistory() {
-    history = [];
+  function sanitizeMessages(messages) {
+    return Array.isArray(messages)
+      ? messages.filter(msg =>
+          msg &&
+          typeof msg.role === 'string' &&
+          typeof msg.content === 'string' &&
+          msg.content.length > 0
+        )
+      : [];
+  }
+
+  function sanitizeSavedConversations(conversations) {
+    return Array.isArray(conversations)
+      ? conversations
+          .filter(conv => conv && typeof conv.id === 'string' && typeof conv.savedAt === 'string')
+          .map(conv => ({
+            id: conv.id,
+            savedAt: conv.savedAt,
+            preview: typeof conv.preview === 'string' ? conv.preview : '',
+            messages: sanitizeMessages(conv.messages),
+          }))
+      : [];
+  }
+
+  async function persistHistory() {
+    if (!currentProjectSlug) return;
     try {
-      const raw = localStorage.getItem(historyKey());
-      if (raw) history = JSON.parse(raw);
-    } catch { history = []; }
+      await fetch(`/api/projects/${encodeURIComponent(currentProjectSlug)}/chat-history`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          current_messages: history,
+          saved_conversations: savedConversations,
+        }),
+      });
+    } catch {
+      /* ignore transient persistence failures */
+    }
+  }
+
+  async function loadAndRestoreHistory() {
+    history = [];
+    savedConversations = [];
+
+    if (!currentProjectSlug) {
+      clearRenderedMessages();
+      scrollToBottomForce();
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/projects/${encodeURIComponent(currentProjectSlug)}/chat-history`);
+      if (res.ok) {
+        const payload = await res.json();
+        history = sanitizeMessages(payload.current_messages);
+        savedConversations = sanitizeSavedConversations(payload.saved_conversations);
+      }
+    } catch {
+      history = [];
+      savedConversations = [];
+    }
 
     // Remove all message nodes except the intro
-    while (messagesEl.children.length > 1) messagesEl.removeChild(messagesEl.lastChild);
+    clearRenderedMessages();
 
     history.forEach(msg => {
       if (msg.role === 'user') _appendUserMsg(msg.content);
@@ -93,26 +146,24 @@
   }
 
   /** Push current history to the "saved" list. */
-  function saveSnapshot() {
+  async function saveSnapshot() {
     if (!history.length) return;
-    try {
-      const saved = JSON.parse(localStorage.getItem(savedKey()) || '[]');
-      const preview = (history.find(m => m.role === 'user')?.content || '').slice(0, 80);
-      saved.unshift({
-        id:      Date.now().toString(),
-        savedAt: new Date().toISOString(),
-        preview,
-        messages: [...history],
-      });
-      localStorage.setItem(savedKey(), JSON.stringify(saved.slice(0, 15)));
-    } catch { /* quota */ }
+    const preview = (history.find(m => m.role === 'user')?.content || '').slice(0, 80);
+    savedConversations.unshift({
+      id: Date.now().toString(),
+      savedAt: new Date().toISOString(),
+      preview,
+      messages: [...history],
+    });
+    savedConversations = savedConversations.slice(0, 15);
+    await persistHistory();
   }
 
   /** Load a saved conversation (replaces current). */
-  function loadConversation(conv) {
+  async function loadConversation(conv) {
     history = [...conv.messages];
-    persistHistory();
-    while (messagesEl.children.length > 1) messagesEl.removeChild(messagesEl.lastChild);
+    await persistHistory();
+    clearRenderedMessages();
     history.forEach(msg => {
       if (msg.role === 'user') _appendUserMsg(msg.content);
       else                     _appendAssistantMsg(msg.content);
@@ -121,11 +172,11 @@
   }
 
   /** Start fresh — saves current first. */
-  function newChat() {
-    saveSnapshot();
+  async function newChat() {
+    await saveSnapshot();
     history = [];
-    persistHistory();
-    while (messagesEl.children.length > 1) messagesEl.removeChild(messagesEl.lastChild);
+    await persistHistory();
+    clearRenderedMessages();
     scrollToBottomForce();
   }
 
@@ -142,11 +193,14 @@
   function _appendAssistantMsg(text) {
     const el = document.createElement('div');
     el.className = 'message assistant-message';
+    const body = document.createElement('div');
+    body.className = 'assistant-message-body';
     const bubble = document.createElement('div');
     bubble.className = 'message-bubble';
     bubble.innerHTML = renderMarkdownWithMath(text);
     el.innerHTML = '<div class="message-avatar">V</div>';
-    el.appendChild(bubble);
+    body.appendChild(bubble);
+    el.appendChild(body);
     messagesEl.appendChild(el);
     applyKatex(bubble);
     activateDocLinks(bubble);
@@ -164,12 +218,11 @@
     }
 
     try {
-      const saved = JSON.parse(localStorage.getItem(savedKey()) || '[]');
-      if (!saved.length) {
+      if (!savedConversations.length) {
         historyListEl.innerHTML = '<div class="history-empty">No saved conversations for this project</div>';
         return;
       }
-      historyListEl.innerHTML = saved.map(conv => {
+      historyListEl.innerHTML = savedConversations.map(conv => {
         const date  = new Date(conv.savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' });
         const turns = conv.messages.filter(m => m.role === 'user').length;
         return `<div class="history-item" data-id="${conv.id}">
@@ -182,30 +235,30 @@
       }).join('');
 
       historyListEl.querySelectorAll('.history-item').forEach(el => {
-        el.addEventListener('click', (e) => {
+        el.addEventListener('click', async (e) => {
           if (e.target.closest('.history-item-del')) return;
           const id   = el.dataset.id;
-          const conv = saved.find(c => c.id === id);
-          if (conv) { loadConversation(conv); closeHistory(); }
+          const conv = savedConversations.find(c => c.id === id);
+          if (conv) {
+            await loadConversation(conv);
+            closeHistory();
+          }
         });
       });
 
       historyListEl.querySelectorAll('.history-item-del').forEach(btn => {
-        btn.addEventListener('click', (e) => {
+        btn.addEventListener('click', async (e) => {
           e.stopPropagation();
-          deleteConversation(btn.dataset.id);
+          await deleteConversation(btn.dataset.id);
         });
       });
     } catch { historyListEl.innerHTML = '<div class="history-empty">Error loading history</div>'; }
   }
 
-  function deleteConversation(id) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(savedKey()) || '[]');
-      const updated = saved.filter(c => c.id !== id);
-      localStorage.setItem(savedKey(), JSON.stringify(updated));
-      renderHistoryDropdown();
-    } catch { /* ignore */ }
+  async function deleteConversation(id) {
+    savedConversations = savedConversations.filter(c => c.id !== id);
+    await persistHistory();
+    renderHistoryDropdown();
   }
 
   function openHistory()  { historyDropdown.classList.remove('hidden'); renderHistoryDropdown(); }
@@ -222,12 +275,10 @@
 
   /* ── Called by app.js when a project is activated ──────────────────────── */
   window.Chat = {
-    onProjectActivated(filename) {
-      if (currentFilename && history.length) {
-        localStorage.setItem(historyKey(), JSON.stringify(history));
-      }
+    async onProjectActivated(filename, slug) {
       currentFilename = filename;
-      loadAndRestoreHistory();
+      currentProjectSlug = slug || null;
+      await loadAndRestoreHistory();
     },
   };
 
@@ -240,13 +291,29 @@
   function createAssistantBubble() {
     const el = document.createElement('div');
     el.className = 'message assistant-message';
+    const body = document.createElement('div');
+    body.className = 'assistant-message-body';
+    const thinking = document.createElement('details');
+    thinking.className = 'thinking-block hidden';
+    thinking.innerHTML = `
+      <summary class="thinking-summary">
+        <span>Thinking</span>
+      </summary>
+      <div class="thinking-content"></div>
+    `;
+    const thinkingContent = thinking.querySelector('.thinking-content');
     el.innerHTML = `
       <div class="message-avatar">V</div>
-      <div class="message-bubble"><span class="typing-cursor"></span></div>
     `;
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble';
+    bubble.innerHTML = '<span class="typing-cursor"></span>';
+    body.appendChild(thinking);
+    body.appendChild(bubble);
+    el.appendChild(body);
     messagesEl.appendChild(el);
     scrollToBottomForce();
-    return el.querySelector('.message-bubble');
+    return { bubble, thinking, thinkingContent };
   }
 
   /** Single tool indicator — replaced each time a new tool starts. */
@@ -267,40 +334,84 @@
 
   function formatToolName(name) {
     const labels = {
-      rag_local_query:        'Searching local context…',
-      rag_global_query:       'Searching global context…',
+      rag_local_query:        'Retrieving local context…',
+      rag_global_query:       'Retrieving global context…',
       explore_node_neighbors: 'Exploring graph neighbors…',
-      get_node_details:       'Inspecting node…',
+      get_node_details:       'Inspecting node details…',
       list_key_entities:      'Listing key entities…',
-      get_document_info:      'Reading document info…',
+      get_document_info:      'Fetching document info…',
       read_document:          'Reading document…',
       search_document:        'Searching document…',
       create_doc_link:        'Creating reference link…',
-      scroll_to_line:         'Navigating to line…',
+      scroll_to_line:         'Jumping to line…',
     };
     return labels[name] || `${name}…`;
   }
 
-  function updateBubble(bubble, thoughtSegments, text, streaming) {
-    let html = '';
+  function formatToolThought(toolName, toolInput) {
+    const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+    switch (toolName) {
+      case 'get_document_info':
+        return 'Fetching document info.';
+      case 'search_document':
+        return input.query
+          ? `Searching for: "${String(input.query)}".`
+          : 'Searching the document.';
+      case 'read_document': {
+        const start = Number.parseInt(input.start_line, 10);
+        const end = Number.parseInt(input.end_line, 10);
+        if (Number.isFinite(start) && Number.isFinite(end)) {
+          return `Reading lines ${start}-${end}.`;
+        }
+        return 'Reading document content.';
+      }
+      case 'scroll_to_line': {
+        const line = Number.parseInt(input.line_number, 10);
+        if (Number.isFinite(line)) {
+          return `Jumping to line ${line}.`;
+        }
+        return 'Jumping to a document location.';
+      }
+      case 'rag_local_query':
+        return 'Retrieving local context.';
+      case 'rag_global_query':
+        return 'Retrieving global context.';
+      case 'list_key_entities':
+        return 'Inspecting key entities.';
+      case 'get_node_details':
+        return 'Inspecting graph node details.';
+      case 'explore_node_neighbors':
+        return 'Exploring related graph nodes.';
+      default:
+        return `Calling tool: ${toolName}.`;
+    }
+  }
 
-    if (thoughtSegments.length > 0) {
-      const inner = thoughtSegments
-        .map(t => `<div class="thought-seg">${renderMarkdownWithMath(t)}</div>`)
-        .join('');
-      const steps = thoughtSegments.length;
-      html += `<details class="thinking-block">
-        <summary class="thinking-summary">
-          <span>Thinking · ${steps} step${steps !== 1 ? 's' : ''}</span>
-        </summary>
-        <div class="thinking-content">${inner}</div>
-      </details>`;
+  function updateThinkingBlock(thinking, thinkingContent, text) {
+    const hasThought = !!text.trim();
+    thinking.classList.toggle('hidden', !hasThought);
+    if (!hasThought) {
+      thinkingContent.innerHTML = '';
+      return;
+    }
+    thinkingContent.innerHTML = renderMarkdownWithMath(text);
+    applyKatex(thinkingContent);
+    activateDocLinks(thinkingContent);
+  }
+
+  function updateBubble(bubble, text, streaming) {
+    const hasText = !!text.trim();
+    if (!hasText && !streaming) {
+      bubble.classList.add('hidden');
+      bubble.innerHTML = '';
+      return;
     }
 
-    html += renderMarkdownWithMath(text || '');
+    bubble.classList.remove('hidden');
+    let html = renderMarkdownWithMath(text || '');
     if (streaming) html += '<span class="typing-cursor"></span>';
 
-    bubble.innerHTML = html || (streaming ? '<span class="typing-cursor"></span>' : '<em>no response</em>');
+    bubble.innerHTML = html || '<span class="typing-cursor"></span>';
   }
 
   function activateDocLinks(container) {
@@ -369,27 +480,27 @@
 
     appendUserMessage(text);
 
-    const bubble          = createAssistantBubble();
-    let   rawText         = '';
-    let   thoughtSegments = [];
-    let   currentToolEl   = null;
+    const assistantView = createAssistantBubble();
+    let   visibleText   = '';
+    let   thoughtText   = '';
+    let   currentToolEl = null;
 
     const cleanup = () => {
       if (currentToolEl) { currentToolEl.remove(); currentToolEl = null; }
-      bubble.querySelectorAll('.typing-cursor').forEach(c => c.remove());
+      assistantView.bubble.querySelectorAll('.typing-cursor').forEach(c => c.remove());
       App.setStreaming(false);
     };
 
     const finaliseBubble = () => {
-      updateBubble(bubble, thoughtSegments, rawText, false);
-      applyKatex(bubble);
-      activateDocLinks(bubble);
+      updateBubble(assistantView.bubble, visibleText, false);
+      updateThinkingBlock(assistantView.thinking, assistantView.thinkingContent, thoughtText);
+      applyKatex(assistantView.bubble);
+      activateDocLinks(assistantView.bubble);
       scrollToBottom();
     };
 
     // Snapshot history BEFORE adding current message (sent as context).
-    // Sanitize to ensure only valid {role, content} string pairs are sent —
-    // stale or corrupt localStorage data could otherwise trigger a backend 422.
+    // Sanitize to ensure only valid {role, content} string pairs are sent.
     const historySnapshot = history
       .slice(-(MAX_HISTORY_TURNS * 2))
       .filter(m => typeof m.role === 'string' && typeof m.content === 'string' && m.content.length > 0);
@@ -407,7 +518,7 @@
           const errBody = await res.json();
           detail = errBody.detail || JSON.stringify(errBody);
         } catch { /* body is not JSON */ }
-        bubble.innerHTML = `<span style="color:var(--error)">Error ${res.status}: ${escapeHtml(String(detail))}</span>`;
+        assistantView.bubble.innerHTML = `<span style="color:var(--error)">Error ${res.status}: ${escapeHtml(String(detail))}</span>`;
         return;
       }
 
@@ -433,21 +544,26 @@
 
           switch (event.type) {
 
+            case 'message_to_user':
             case 'text':
-              rawText += event.content;
-              updateBubble(bubble, thoughtSegments, rawText, true);
-              activateDocLinks(bubble);
+              visibleText += event.content;
+              updateBubble(assistantView.bubble, visibleText, true);
+              activateDocLinks(assistantView.bubble);
+              scrollToBottom();
+              break;
+
+            case 'thought':
+              thoughtText += event.content;
+              updateThinkingBlock(assistantView.thinking, assistantView.thinkingContent, thoughtText);
               scrollToBottom();
               break;
 
             case 'tool_call': {
-              if (rawText.trim()) {
-                thoughtSegments.push(rawText);
-                rawText = '';
-              }
               if (currentToolEl) currentToolEl.remove();
               currentToolEl = createToolIndicator(event.tool_name);
-              updateBubble(bubble, thoughtSegments, rawText, true);
+              thoughtText += (thoughtText.trim() ? '\n\n' : '') + formatToolThought(event.tool_name, event.tool_input);
+              updateThinkingBlock(assistantView.thinking, assistantView.thinkingContent, thoughtText);
+              updateBubble(assistantView.bubble, visibleText, true);
               scrollToBottom();
               break;
             }
@@ -464,10 +580,10 @@
               cleanup();
               finaliseBubble();
               // Record partial response in history
-              if (rawText.trim()) {
+              if (visibleText.trim()) {
                 history.push({ role: 'user', content: text });
-                history.push({ role: 'assistant', content: rawText });
-                persistHistory();
+                history.push({ role: 'assistant', content: visibleText });
+                await persistHistory();
               }
               createRecursionLimitBanner(() => {
                 sendMessage('Please continue from where you left off.');
@@ -475,23 +591,27 @@
               return;
 
             case 'error':
-              rawText += `\n\n*Error: ${escapeHtml(event.content)}*`;
-              updateBubble(bubble, thoughtSegments, rawText, false);
+              visibleText += `\n\n*Error: ${escapeHtml(event.content)}*`;
+              updateBubble(assistantView.bubble, visibleText, false);
               break;
 
             case 'done':
               cleanup();
               finaliseBubble();
               // Record completed turn in history
-              history.push({ role: 'user',      content: text });
-              history.push({ role: 'assistant', content: rawText });
-              persistHistory();
+              if (visibleText.trim()) {
+                history.push({ role: 'user',      content: text });
+                history.push({ role: 'assistant', content: visibleText });
+                await persistHistory();
+              } else if (thoughtText.trim()) {
+                console.debug('Assistant produced thought only; skipping empty visible reply.');
+              }
               return;
           }
         }
       }
     } catch (err) {
-      bubble.innerHTML = `<span style="color:var(--error)">Connection error: ${escapeHtml(String(err))}</span>`;
+      assistantView.bubble.innerHTML = `<span style="color:var(--error)">Connection error: ${escapeHtml(String(err))}</span>`;
     } finally {
       cleanup();
     }

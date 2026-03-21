@@ -92,11 +92,12 @@ async function uploadFileObject(file) {
     }
     const data = await res.json();
     App.currentFilename = data.filename;
+    App.currentProjectSlug = data.slug || null;
     document.getElementById('docFilename').textContent = data.filename;
     App.setStatus('indexing', suffix === 'pdf' ? 'Converting PDF via MinerU…' : 'Indexing…');
     pollStatus();
     Viewer.loadContent();
-    if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename);
+    if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename, data.slug || null);
   } catch {
     App.setStatus('error', 'Network error');
   }
@@ -179,9 +180,11 @@ function pollStatus() {
       const data = await res.json();
       switch (data.status) {
         case 'indexing':
+          App.currentProjectSlug = data.slug || App.currentProjectSlug;
           App.setStatus('indexing', data.message || 'Indexing…');
           break;
         case 'ready':
+          App.currentProjectSlug = data.slug || App.currentProjectSlug;
           App.setStatus('ready', data.filename ? `Ready · ${data.filename}` : 'Ready');
           clearInterval(interval);
           // Reload viewer once indexing is done so PDF viewer / markdown
@@ -282,7 +285,7 @@ function pollStatus() {
       projects.forEach(p => { p.is_active = p.slug === slug; });
       renderProjects();
       Viewer.loadContent();
-      if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename);
+      if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename, slug);
     } catch {
       App.setStatus('error', 'Network error');
     }
@@ -332,10 +335,11 @@ function pollStatus() {
       const data = await res.json();
       if (data.status === 'ready' && data.filename) {
         App.currentFilename = data.filename;
+        App.currentProjectSlug = data.slug || null;
         document.getElementById('docFilename').textContent = data.filename;
         App.setStatus('ready', `Ready · ${data.filename}`);
         Viewer.loadContent();
-        if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename);
+        if (typeof Chat !== 'undefined') Chat.onProjectActivated(data.filename, data.slug || null);
       }
     } catch { /* ignore */ }
   })();
