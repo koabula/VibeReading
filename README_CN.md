@@ -92,6 +92,8 @@ VibeReading/
 uv sync
 ```
 
+`uv sync` 会按 `pyproject.toml` 和 `uv.lock` 安装完整运行依赖，其中已经包含 `nano-graphrag`，不需要再额外手动安装其他 Python 包。
+
 ## 5. 配置 `.env`
 
 复制模板：
@@ -121,13 +123,23 @@ cp .env.example .env
   - `PROJECTS_DIR`：项目目录，默认 `projects`
   - `UPLOAD_DIR`：上传目录，默认 `uploads`
 
-说明：当前代码实际使用 `PROJECTS_DIR` 与 `UPLOAD_DIR`。如果你在 `.env.example` 中看到 `NANO_WORKING_DIR`，它属于旧字段，不是当前主流程配置项。
+说明：当前代码实际使用 `PROJECTS_DIR` 与 `UPLOAD_DIR`。`NANO_WORKING_DIR` 只用于兼容旧目录结构，不是当前主流程配置项。
 
 ## 6. 启动方式
 
+开发模式（带热重载）：
+
 ```bash
-uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000 --reload-dir backend --reload-dir frontend --reload-exclude .venv --reload-exclude .uv-cache --reload-exclude projects --reload-exclude uploads
 ```
+
+稳定模式（不带热重载）：
+
+```bash
+uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000
+```
+
+开发调试时使用带热重载的命令。若你只是想稳定启动服务，使用不带 `--reload` 的命令即可。
 
 浏览器访问：
 

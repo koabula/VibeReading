@@ -92,6 +92,8 @@ Install dependencies:
 uv sync
 ```
 
+`uv sync` installs the full runtime dependency set declared in `pyproject.toml` and pinned by `uv.lock`, including `nano-graphrag`. You should not need to manually install extra Python packages afterward.
+
 ## 5. Configure `.env`
 
 Copy the template:
@@ -121,13 +123,23 @@ Key variables:
   - `PROJECTS_DIR`: defaults to `projects`
   - `UPLOAD_DIR`: defaults to `uploads`
 
-Note: the current code uses `PROJECTS_DIR` and `UPLOAD_DIR`. If you still see `NANO_WORKING_DIR` in `.env.example`, it is a legacy field and not part of the current main flow.
+Note: the current code uses `PROJECTS_DIR` and `UPLOAD_DIR`. `NANO_WORKING_DIR` is only a legacy compatibility field and is not part of the current main flow.
 
 ## 6. Run
 
+Development mode with hot reload:
+
 ```bash
-uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uv run uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000 --reload-dir backend --reload-dir frontend --reload-exclude .venv --reload-exclude .uv-cache --reload-exclude projects --reload-exclude uploads
 ```
+
+Stable mode without hot reload:
+
+```bash
+uv run uvicorn backend.app:app --host 0.0.0.0 --port 8000
+```
+
+Use the hot-reload command for local development. Use the non-reload command if you just want to run the app stably.
 
 Open in your browser:
 
